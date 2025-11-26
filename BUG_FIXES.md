@@ -1,38 +1,34 @@
 # Glide Interview
 
-- What caused each bug
-- How the fix resolves it
-- What preventive measures can avoid similar issues
+## Ticket UI-101: Dark Mode Text Visibility
 
-**Ticket UI-101: Dark Mode Text Visibility**
+Inside `@app/globals.css`, the background and foreground colors for dark mode were inverted. After correcting these variables, the dark mode theme now effectively mirrors the light mode theme. Currently, this fix effectively disables dark mode support, but allows for it to be properly implemented as a future feature update.
 
-Inside @app/globals.css, the background and foreground colors when in dark mode were flipped. After flipping these variables, the dark mode just acts like light mode. At this moment, this fix will make it where we don't support dark mode, which can be a future feature update.
+## Ticket VAL-202: Date of Birth Validation
 
-**Ticket VAL-202: Date of Birth Validation**
+The Date of Birth input field previously lacked age validation. I added a validation check to ensure users are at least 18 years old. If a user fails this validation, the form displays an error message and prevents them from proceeding to the next step. To prevent similar issues in the future, we should always verify the requirements for date inputs and implement appropriate validation constraints.
 
-Date of birth input field had no validation for age. Added a validation check that makes sure users are 18 years old. If the user fails the validation, the form will display that error to the user and prevent them from moving to the next step. To prevent these types of bugs in the future, double check the reason for date inputs and write appropriate validation based on the constraints.
+## Ticket VAL-206: Card Number Validation
 
-**Ticket VAL-206: Card Number Validation**
+Credit card validation requires passing the Luhn algorithm and verifying the card provider. To address this, I integrated the `card-validator` package to handle these checks on the client side. As an additional step, I restricted acceptance to Visa and Mastercard only, assuming these are the currently supported providers. This configuration can be adjusted later as we expand support to other card providers.
 
-When validating credit card numbers, it needs to pass the Luhn algorithm, and only authorize which provider you want. For the fix, I added a package, card-validator, that does this on the browser side. As an extra validation step, I also added a check for Visa and Mastercards only, assuming that is the only cards we support at the moment. This can change afterwards depending on which card providers we want to / are able to support.
+## Ticket VAL-208: Weak Password Requirements
 
-**Ticket VAL-208: Weak Password Requirements**
+To enhance password security, I updated the validation logic to include three new requirements: at least one uppercase letter, one lowercase letter, and one special character. This ensures stricter and more robust password standards.
 
-To enhance our password validation, I added 3 new rules to the existing password validation, adding the requirement of at least 1 capital letter, 1 lowercase letter, and 1 special character. This should make the password validation more robust.
+## Ticket SEC-301: SSN Storage
 
-**Ticket SEC-301: SSN Storage**
+Previously, SSNs were stored in the database without encryption. To fix this, I introduced a server-side environment variable named `SSN_KEY`. (Note: In my local environment, I have set this to a placeholder value). I implemented a reversible encryption function specifically for SSNs, though it can be adapted for other sensitive data. Moving forward, we should identify other private user information that requires encryption and apply similar protection.
 
-We are not encrypting the SSN when the server adds to the database. To fix this, we need to add an environment to our server only. The environment variable should be named SSN_KEY. At the moment in my local env file, I have it saved as "thisissofun". For the encryption, I made a function that we can rework for other values we would want to encrypt later, but for now its specifically named for the SSN. The encryption is reversable, if we ever need to pull the users SSN. While we are working on this ticket, we should also consider any other private user information we would like to encrypt, and encrypt those values as well.
+## Ticket SEC-303: XSS Vulnerability
 
-**Ticket SEC-303: XSS Vulnerability**
+This fix involved removing the `dangerouslySetInnerHTML` attribute from the span element and rendering the content as plain text instead. On the backend, account descriptions are currently generated manually based on account type. However, this fix safeguards against Cross-Site Scripting (XSS) attacks should we allow users to write custom descriptions in the future.
 
-This was a small fix, I remove the dangerouslySetInnerHTML tag from the span, and just rendered text. On the backend, we are creating the descriptions manualy with the account type, so this fix will prevent scripting attacks in the event where in the future, we allow users to write their own descriptions.
+## Ticket PERF-401: Account Creation Error
 
-**Ticket PERF-401: Account Creation Error**
+Previously, if the database operation to create an account succeeded but the subsequent fetch failed, the system would return incorrect default data instead of an error. I updated the logic to throw an appropriate error if the created account cannot be retrieved. The frontend is already equipped to handle account creation errors, so this change was limited to the server. While addressing this, it would be prudent to review other API routes that perform insert or create operations to ensure failed database operations are handled correctly.
 
-After the DB operation to make a new entry in the accounts table, we try to fetch the account that we made. But we were not throwing an error if the account fetch failed. We were just giving the user back incorrect default data. The fix is that now, after attempting to fetch the created account, if we can't get it, we throw an error with an appropriate message. The front end is already setup to handle errors in account creation, so we just needed to add it to the server. Since we are alreay in this ticket, to prevent other similar bugs, this would be a good opportunity to go over other api routes that do inserts or creates and double check if we handle failed DB operations correctly.
-
-**Self Reported Ticket, Successfull funding returns oldest transaction**
+## Self Reported Ticket: Successful funding returns oldest transaction
 
 ```js
 const transaction = await db
@@ -43,8 +39,13 @@ const transaction = await db
     .get();
 ```
 
-This bug is caused by the default functionality of the .orderBy in drizzle. By default, it orders by ascending order. When in this case, we would need the descending case. To fix it, just added a new param to the orderBy function like this `.orderBy(transactions.createdAt, 'desc')`
+This bug stemmed from the default behavior of Drizzle's `.orderBy` method, which sorts in ascending order. For this use case, we need the most recent transaction (descending order). I fixed this by explicitly specifying the sort direction: `.orderBy(transactions.createdAt, 'desc')`.
 
-**Ticket PERF-405: Missing Transactions**
+## Ticket PERF-405: Missing Transactions
 
-From what I can see, this issue has 2 parts. 1 part is the server does not return an error if the funding DB operation failed. The second issue is that on the frontend, if the user is looking at the transaction history, and we make a new funding event, the table should refetch just like how the balance refetches. The first server fix would be a simialr solution that I did on PERF-401.
+This issue appears to be twofold:
+
+1. The server does not return an error if the funding database operation fails.
+2. The frontend transaction history table does not automatically refetch data after a new funding event.
+
+The server-side fix follows the same pattern implemented in PERF-401. On the frontend, after a successful funding event, we refetch the transaction data to show the user his latest transaction without having the user needing to refresh the page.
