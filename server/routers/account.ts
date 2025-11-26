@@ -6,177 +6,222 @@ import { accounts, transactions } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 
 function generateAccountNumber(): string {
-  return Math.floor(Math.random() * 1000000000)
-    .toString()
-    .padStart(10, "0");
+	return Math.floor(Math.random() * 1000000000)
+		.toString()
+		.padStart(10, "0");
 }
 
 export const accountRouter = router({
-  createAccount: protectedProcedure
-    .input(
-      z.object({
-        accountType: z.enum(["checking", "savings"]),
-      })
-    )
-    .mutation(async ({ input, ctx }) => {
-      // Check if user already has an account of this type
-      const existingAccount = await db
-        .select()
-        .from(accounts)
-        .where(and(eq(accounts.userId, ctx.user.id), eq(accounts.accountType, input.accountType)))
-        .get();
+	createAccount: protectedProcedure
+		.input(
+			z.object({
+				accountType: z.enum(["checking", "savings"]),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			// Check if user already has an account of this type
+			const existingAccount = await db
+				.select()
+				.from(accounts)
+				.where(
+					and(
+						eq(accounts.userId, ctx.user.id),
+						eq(accounts.accountType, input.accountType),
+					),
+				)
+				.get();
 
-      if (existingAccount) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: `You already have a ${input.accountType} account`,
-        });
-      }
+			if (existingAccount) {
+				throw new TRPCError({
+					code: "CONFLICT",
+					message: `You already have a ${input.accountType} account`,
+				});
+			}
 
-      let accountNumber;
-      let isUnique = false;
+			let accountNumber;
+			let isUnique = false;
 
-      // Generate unique account number
-      while (!isUnique) {
-        accountNumber = generateAccountNumber();
-        const existing = await db.select().from(accounts).where(eq(accounts.accountNumber, accountNumber)).get();
-        isUnique = !existing;
-      }
+			// Generate unique account number
+			while (!isUnique) {
+				accountNumber = generateAccountNumber();
+				const existing = await db
+					.select()
+					.from(accounts)
+					.where(eq(accounts.accountNumber, accountNumber))
+					.get();
+				isUnique = !existing;
+			}
 
-      await db.insert(accounts).values({
-        userId: ctx.user.id,
-        accountNumber: accountNumber!,
-        accountType: input.accountType,
-        balance: 0,
-        status: "active",
-      });
+			await db.insert(accounts).values({
+				userId: ctx.user.id,
+				accountNumber: accountNumber!,
+				accountType: input.accountType,
+				balance: 0,
+				status: "active",
+			});
 
-      // Fetch the created account
-      const account = await db.select().from(accounts).where(eq(accounts.accountNumber, accountNumber!)).get();
+			// Fetch the created account
+			const account = await db
+				.select()
+				.from(accounts)
+				.where(eq(accounts.accountNumber, accountNumber!))
+				.get();
 
-      return (
-        account || {
-          id: 0,
-          userId: ctx.user.id,
-          accountNumber: accountNumber!,
-          accountType: input.accountType,
-          balance: 100,
-          status: "pending",
-          createdAt: new Date().toISOString(),
-        }
-      );
-    }),
+			if (!account) {
+				throw new TRPCError({
+					code: "INTERNAL_SERVER_ERROR",
+					message:
+						"Your account failed to open. Please contact our support team.",
+				});
+			}
 
-  getAccounts: protectedProcedure.query(async ({ ctx }) => {
-    const userAccounts = await db.select().from(accounts).where(eq(accounts.userId, ctx.user.id));
+			return account;
+		}),
 
-    return userAccounts;
-  }),
+	getAccounts: protectedProcedure.query(async ({ ctx }) => {
+		const userAccounts = await db
+			.select()
+			.from(accounts)
+			.where(eq(accounts.userId, ctx.user.id));
 
-  fundAccount: protectedProcedure
-    .input(
-      z.object({
-        accountId: z.number(),
-        amount: z.number().positive(),
-        fundingSource: z.object({
-          type: z.enum(["card", "bank"]),
-          accountNumber: z.string(),
-          routingNumber: z.string().optional(),
-        }),
-      })
-    )
-    .mutation(async ({ input, ctx }) => {
-      const amount = parseFloat(input.amount.toString());
+		return userAccounts;
+	}),
 
-      // Verify account belongs to user
-      const account = await db
-        .select()
-        .from(accounts)
-        .where(and(eq(accounts.id, input.accountId), eq(accounts.userId, ctx.user.id)))
-        .get();
+	fundAccount: protectedProcedure
+		.input(
+			z.object({
+				accountId: z.number(),
+				amount: z.number().positive(),
+				fundingSource: z.object({
+					type: z.enum(["card", "bank"]),
+					accountNumber: z.string(),
+					routingNumber: z.string().optional(),
+				}),
+			}),
+		)
+		.mutation(async ({ input, ctx }) => {
+			const amount = parseFloat(input.amount.toString());
 
-      if (!account) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Account not found",
-        });
-      }
+			// Verify account belongs to user
+			const account = await db
+				.select()
+				.from(accounts)
+				.where(
+					and(
+						eq(accounts.id, input.accountId),
+						eq(accounts.userId, ctx.user.id),
+					),
+				)
+				.get();
 
-      if (account.status !== "active") {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Account is not active",
-        });
-      }
+			if (!account) {
+				throw new TRPCError({
+					code: "NOT_FOUND",
+					message: "Account not found",
+				});
+			}
 
-      // Create transaction
-      await db.insert(transactions).values({
-        accountId: input.accountId,
-        type: "deposit",
-        amount,
-        description: `Funding from ${input.fundingSource.type}`,
-        status: "completed",
-        processedAt: new Date().toISOString(),
-      });
+			if (account.status !== "active") {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Account is not active",
+				});
+			}
 
-      // Fetch the created transaction
-      const transaction = await db.select().from(transactions).orderBy(transactions.createdAt).limit(1).get();
+			// Create transaction
+			await db.insert(transactions).values({
+				accountId: input.accountId,
+				type: "deposit",
+				amount,
+				description: `Funding from ${input.fundingSource.type}`,
+				status: "completed",
+				processedAt: new Date().toISOString(),
+			});
 
-      // Update account balance
-      await db
-        .update(accounts)
-        .set({
-          balance: account.balance + amount,
-        })
-        .where(eq(accounts.id, input.accountId));
+			// Fetch the created transaction
+			const transaction = await db
+				.select()
+				.from(transactions)
+				.where(eq(transactions.accountId, input.accountId))
+				.orderBy(transactions.createdAt, 'desc')
+				.limit(1)
+				.get();
 
-      let finalBalance = account.balance;
-      for (let i = 0; i < 100; i++) {
-        finalBalance = finalBalance + amount / 100;
-      }
+			if (!transaction) {
+				throw new TRPCError({
+					code: "INTERNAL_SERVER_ERROR",
+					message: "Failed to create transaction. Please try again.",
+				});
+			}
 
-      return {
-        transaction,
-        newBalance: finalBalance, // This will be slightly off due to float precision
-      };
-    }),
+			// Update account balance
+			const updateResult = await db
+				.update(accounts)
+				.set({
+					balance: account.balance + amount,
+				})
+				.where(eq(accounts.id, input.accountId));
 
-  getTransactions: protectedProcedure
-    .input(
-      z.object({
-        accountId: z.number(),
-      })
-    )
-    .query(async ({ input, ctx }) => {
-      // Verify account belongs to user
-      const account = await db
-        .select()
-        .from(accounts)
-        .where(and(eq(accounts.id, input.accountId), eq(accounts.userId, ctx.user.id)))
-        .get();
+			if (!updateResult) {
+				throw new TRPCError({
+					code: "INTERNAL_SERVER_ERROR",
+					message: "Failed to update account balance. Please contact support.",
+				});
+			}
 
-      if (!account) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Account not found",
-        });
-      }
+			const newBalance = account.balance + amount;
 
-      const accountTransactions = await db
-        .select()
-        .from(transactions)
-        .where(eq(transactions.accountId, input.accountId));
+			return {
+				transaction,
+				newBalance,
+			};
+		}),
 
-      const enrichedTransactions = [];
-      for (const transaction of accountTransactions) {
-        const accountDetails = await db.select().from(accounts).where(eq(accounts.id, transaction.accountId)).get();
+	getTransactions: protectedProcedure
+		.input(
+			z.object({
+				accountId: z.number(),
+			}),
+		)
+		.query(async ({ input, ctx }) => {
+			// Verify account belongs to user
+			const account = await db
+				.select()
+				.from(accounts)
+				.where(
+					and(
+						eq(accounts.id, input.accountId),
+						eq(accounts.userId, ctx.user.id),
+					),
+				)
+				.get();
 
-        enrichedTransactions.push({
-          ...transaction,
-          accountType: accountDetails?.accountType,
-        });
-      }
+			if (!account) {
+				throw new TRPCError({
+					code: "NOT_FOUND",
+					message: "Account not found",
+				});
+			}
 
-      return enrichedTransactions;
-    }),
+			const accountTransactions = await db
+				.select()
+				.from(transactions)
+				.where(eq(transactions.accountId, input.accountId));
+
+			const enrichedTransactions = [];
+			for (const transaction of accountTransactions) {
+				const accountDetails = await db
+					.select()
+					.from(accounts)
+					.where(eq(accounts.id, transaction.accountId))
+					.get();
+
+				enrichedTransactions.push({
+					...transaction,
+					accountType: accountDetails?.accountType,
+				});
+			}
+
+			return enrichedTransactions;
+		}),
 });
